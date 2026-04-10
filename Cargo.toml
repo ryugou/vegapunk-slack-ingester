@@ -24,6 +24,8 @@ clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.12", features = ["json"] }
 anyhow = "1"
 thiserror = "1"
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+futures-util = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
