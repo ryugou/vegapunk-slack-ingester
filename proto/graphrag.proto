@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package graphrag;
+
+service GraphRagEngine {
+  rpc Ingest(IngestRequest) returns (IngestResponse);
+  rpc ListSchemas(ListSchemasRequest) returns (ListSchemasResponse);
+  rpc QueryNodes(QueryNodesRequest) returns (QueryNodesResponse);
+}
+
+message IngestRequest {
+  repeated IngestMessage messages = 1;
+  string schema = 2;
+}
+
+message IngestMessage {
+  optional string id = 1;
+  string text = 2;
+  optional MessageMetadata metadata = 3;
+}
+
+message MessageMetadata {
+  string source_type = 1;
+  string author = 2;
+  optional string author_id = 3;
+  string channel = 4;
+  optional string channel_id = 5;
+  optional string thread_id = 6;
+  string timestamp = 7;
+}
+
+message IngestResponse {
+  int32 ingested_count = 1;
+}
+
+message ListSchemasRequest {}
+
+message ListSchemasResponse {
+  repeated Schema schemas = 1;
+}
+
+message Schema {
+  string name = 1;
+}
+
+message QueryNodesRequest {
+  string schema = 1;
+  string node_type = 2;
+  repeated AttributeFilter filters = 3;
+  optional string sort_by = 4;
+  optional string sort_order = 5;
+  optional int32 limit = 6;
+  optional int32 offset = 7;
+  optional TraverseOptions traverse = 8;
+}
+
+message AttributeFilter {
+  string key = 1;
+  string op = 2;
+  string value = 3;
+}
+
+message TraverseOptions {
+  string edge_type = 1;
+  int32 depth = 2;
+}
+
+message QueryNodesResponse {
+  repeated Node nodes = 1;
+}
+
+message Node {
+  string id = 1;
+  string node_type = 2;
+  repeated Attribute attributes = 3;
+}
+
+message Attribute {
+  string key = 1;
+  string value = 2;
+}
