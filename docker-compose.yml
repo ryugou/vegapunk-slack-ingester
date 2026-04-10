@@ -1,0 +1,10 @@
+services:
+  slack-ingester:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - cursor-data:/app/data
+
+volumes:
+  cursor-data:
