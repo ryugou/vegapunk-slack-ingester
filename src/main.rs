@@ -67,19 +67,30 @@ async fn main() -> anyhow::Result<()> {
 
             let cursor_store = cursor::CursorStore::new(&config.cursor_file_path);
 
-            catchup::run_catchup(
+            let alert = vegapunk_slack_ingester::alert::AlertClient::new(
+                &config.slack_bot_token,
+                config.slack_alert_channel_id.clone(),
+            );
+
+            if let Err(e) = catchup::run_catchup(
                 &config,
                 &mut slack_client,
                 &mut vegapunk_client,
                 &cursor_store,
             )
-            .await?;
+            .await
+            {
+                tracing::error!(error = %e, "catchup failed");
+                alert.send(&format!("Catchup failed: {e:#}")).await?;
+                anyhow::bail!("catchup failed: {e:#}");
+            }
 
             slack::socket::run_socket_mode(
                 &config,
                 &mut slack_client,
                 &mut vegapunk_client,
                 &cursor_store,
+                &alert,
             )
             .await?;
 
@@ -119,7 +130,33 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::Health => {
-            tracing::info!("health check OK");
+            let config = config::Config::from_env().unwrap_or_else(|e| {
+                eprintln!("config error: {e:#}");
+                std::process::exit(1);
+            });
+            let mut client = vegapunk::VegapunkClient::connect(
+                &config.vegapunk_grpc_endpoint,
+                &config.vegapunk_auth_token,
+            )
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("Vegapunk connection failed: {e:#}");
+                std::process::exit(1);
+            });
+            let exists = client
+                .check_schema_exists(vegapunk_slack_ingester::SCHEMA_NAME)
+                .await
+                .unwrap_or_else(|e| {
+                    eprintln!("Vegapunk check failed: {e:#}");
+                    std::process::exit(1);
+                });
+            if !exists {
+                eprintln!(
+                    "schema '{}' does not exist",
+                    vegapunk_slack_ingester::SCHEMA_NAME
+                );
+                std::process::exit(1);
+            }
             println!("OK");
             Ok(())
         }
