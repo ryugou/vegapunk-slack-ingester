@@ -1,0 +1,121 @@
+use clap::{Parser, Subcommand};
+use tracing_subscriber::EnvFilter;
+
+use vegapunk_slack_ingester::catchup;
+use vegapunk_slack_ingester::config;
+use vegapunk_slack_ingester::cursor;
+use vegapunk_slack_ingester::import;
+use vegapunk_slack_ingester::slack;
+use vegapunk_slack_ingester::vegapunk;
+
+#[derive(Parser)]
+#[command(name = "vegapunk-slack-ingester")]
+#[command(about = "Ingest Slack messages into Vegapunk")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Start the ingester daemon (catchup + realtime sync)
+    Serve,
+    /// Import historical messages for a channel
+    Import {
+        /// Slack channel ID to import
+        #[arg(long)]
+        channel: String,
+        /// Start date for import (YYYY-MM-DD)
+        #[arg(long)]
+        since: String,
+    },
+    /// Health check
+    Health,
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Serve => {
+            let config = config::Config::from_env()?;
+
+            let mut vegapunk_client = vegapunk::VegapunkClient::connect(
+                &config.vegapunk_grpc_endpoint,
+                &config.vegapunk_auth_token,
+            )
+            .await?;
+            tracing::info!("connected to Vegapunk");
+
+            if !vegapunk_client
+                .check_schema_exists("slack-ingester")
+                .await?
+            {
+                anyhow::bail!("schema 'slack-ingester' does not exist. Create it via admin UI before starting the ingester.");
+            }
+            tracing::info!("schema 'slack-ingester' confirmed");
+
+            let mut slack_client = slack::SlackClient::new(&config.slack_bot_token, 3600);
+
+            let cursor_store = cursor::CursorStore::new(&config.cursor_file_path);
+
+            catchup::run_catchup(
+                &config,
+                &mut slack_client,
+                &mut vegapunk_client,
+                &cursor_store,
+            )
+            .await?;
+
+            slack::socket::run_socket_mode(
+                &config,
+                &mut slack_client,
+                &mut vegapunk_client,
+                &cursor_store,
+            )
+            .await?;
+
+            Ok(())
+        }
+        Commands::Import { channel, since } => {
+            tracing::info!(channel = %channel, since = %since, "starting import mode");
+            let config = config::Config::from_env()?;
+
+            let mut vegapunk_client = vegapunk::VegapunkClient::connect(
+                &config.vegapunk_grpc_endpoint,
+                &config.vegapunk_auth_token,
+            )
+            .await?;
+
+            if !vegapunk_client
+                .check_schema_exists("slack-ingester")
+                .await?
+            {
+                anyhow::bail!("schema 'slack-ingester' does not exist.");
+            }
+
+            let mut slack_client = slack::SlackClient::new(&config.slack_bot_token, 3600);
+
+            import::run_import(
+                &config,
+                &mut slack_client,
+                &mut vegapunk_client,
+                &channel,
+                &since,
+            )
+            .await?;
+
+            Ok(())
+        }
+        Commands::Health => {
+            tracing::info!("health check OK");
+            println!("OK");
+            Ok(())
+        }
+    }
+}
