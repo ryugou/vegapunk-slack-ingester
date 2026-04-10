@@ -18,8 +18,12 @@ pub struct SlackClient {
 impl SlackClient {
     /// Create a new client. `cache_ttl_secs` controls how long user/channel names are cached.
     pub fn new(bot_token: &str, cache_ttl_secs: u64) -> Self {
+        let http = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("failed to build HTTP client"); // infallible with default TLS
         Self {
-            http: Client::new(),
+            http,
             bot_token: bot_token.to_string(),
             user_cache: TtlCache::new(cache_ttl_secs),
             channel_cache: TtlCache::new(cache_ttl_secs),
@@ -90,19 +94,47 @@ impl SlackClient {
         resp.data.context("missing history data")
     }
 
-    /// Fetch all replies in a thread.
+    /// Fetch all replies in a thread, handling pagination automatically.
     pub async fn conversations_replies(
         &self,
         channel_id: &str,
         thread_ts: &str,
     ) -> Result<HistoryData> {
-        let resp: SlackApiResponse<HistoryData> = self
-            .api_get(
-                "conversations.replies",
-                &[("channel", channel_id), ("ts", thread_ts)],
-            )
-            .await?;
-        resp.data.context("missing replies data")
+        let mut all_messages = Vec::new();
+        let mut cursor: Option<String> = None;
+
+        loop {
+            let mut params = vec![("channel", channel_id), ("ts", thread_ts)];
+            let cursor_val;
+            if let Some(ref c) = cursor {
+                cursor_val = c.clone();
+                params.push(("cursor", &cursor_val));
+            }
+
+            let resp: SlackApiResponse<HistoryData> =
+                self.api_get("conversations.replies", &params).await?;
+            let data = resp.data.context("missing replies data")?;
+            all_messages.extend(data.messages);
+
+            let has_more = data.has_more.unwrap_or(false);
+            if !has_more {
+                break;
+            }
+            cursor = data
+                .response_metadata
+                .and_then(|m| m.next_cursor)
+                .filter(|c| !c.is_empty());
+            if cursor.is_none() {
+                break;
+            }
+            sleep(Duration::from_millis(1200)).await;
+        }
+
+        Ok(HistoryData {
+            messages: all_messages,
+            has_more: Some(false),
+            response_metadata: None,
+        })
     }
 
     async fn api_get<T: serde::de::DeserializeOwned>(
@@ -122,7 +154,8 @@ impl SlackClient {
                 .await
                 .with_context(|| format!("failed to call Slack API: {method}"))?;
 
-            if resp.status() == 429 {
+            let status = resp.status();
+            if status == 429 {
                 let retry_after = resp
                     .headers()
                     .get("retry-after")
@@ -131,6 +164,12 @@ impl SlackClient {
                     .unwrap_or(30);
                 warn!(method, retry_after, "Slack API rate limited, waiting");
                 sleep(Duration::from_secs(retry_after)).await;
+                continue;
+            }
+
+            if status.is_server_error() {
+                warn!(method, status = %status, "Slack API server error, retrying after 5s");
+                sleep(Duration::from_secs(5)).await;
                 continue;
             }
 

@@ -17,19 +17,23 @@ impl CursorStore {
 
     /// Load all channel cursors. Returns empty map if file does not exist.
     pub fn load(&self) -> Result<HashMap<String, String>> {
-        if !self.path.exists() {
-            return Ok(HashMap::new());
+        match std::fs::read_to_string(&self.path) {
+            Ok(content) => {
+                let cursors: HashMap<String, String> = serde_json::from_str(&content)
+                    .with_context(|| "failed to parse cursor file")?;
+                Ok(cursors)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(e) => Err(anyhow::anyhow!(e).context(format!(
+                "failed to read cursor file: {}",
+                self.path.display()
+            ))),
         }
-        let content = std::fs::read_to_string(&self.path)
-            .with_context(|| format!("failed to read cursor file: {}", self.path.display()))?;
-        let cursors: HashMap<String, String> =
-            serde_json::from_str(&content).with_context(|| "failed to parse cursor file")?;
-        Ok(cursors)
     }
 
     /// Update the cursor for a single channel and persist to disk.
     pub fn save_channel(&self, channel_id: &str, ts: &str) -> Result<()> {
-        let mut cursors = self.load().unwrap_or_default();
+        let mut cursors = self.load()?;
         cursors.insert(channel_id.to_string(), ts.to_string());
         self.write(&cursors)
     }
