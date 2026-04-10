@@ -8,3 +8,6 @@ pub mod cursor;
 pub mod import;
 pub mod slack;
 pub mod vegapunk;
+
+/// Vegapunk schema name for this ingester.
+pub const SCHEMA_NAME: &str = "slack-ingester";

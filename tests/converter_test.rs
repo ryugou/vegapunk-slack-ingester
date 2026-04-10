@@ -12,11 +12,10 @@ fn test_basic_message_conversion() {
         thread_ts: None,
     };
 
-    let result = slack_to_ingest(&msg, "slack-ingester");
+    let result = slack_to_ingest(&msg);
 
     assert_eq!(result.id, "C06ABC123-1712345678.123456");
     assert_eq!(result.text, "Hello world");
-    assert_eq!(result.schema, "slack-ingester");
     assert_eq!(result.metadata.source_type, "slack");
     assert_eq!(result.metadata.author, "山田太郎");
     assert_eq!(result.metadata.author_id, "U01ABC123");
@@ -39,7 +38,7 @@ fn test_thread_reply_conversion() {
         thread_ts: Some("1712345678.123456".to_string()),
     };
 
-    let result = slack_to_ingest(&msg, "slack-ingester");
+    let result = slack_to_ingest(&msg);
 
     assert_eq!(
         result.metadata.thread_id.as_deref(),
@@ -59,7 +58,7 @@ fn test_timestamp_conversion() {
         thread_ts: None,
     };
 
-    let result = slack_to_ingest(&msg, "slack-ingester");
+    let result = slack_to_ingest(&msg);
 
     let parsed = chrono::DateTime::parse_from_rfc3339(&result.metadata.timestamp);
     assert!(

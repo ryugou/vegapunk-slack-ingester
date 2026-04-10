@@ -16,6 +16,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -r -s /bin/false ingester
+RUN mkdir -p /app/data && chown ingester:ingester /app/data
 USER ingester
 
 COPY --from=builder /app/target/release/vegapunk-slack-ingester /app/vegapunk-slack-ingester

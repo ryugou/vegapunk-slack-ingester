@@ -1,5 +1,6 @@
 use anyhow::Result;
 use reqwest::Client;
+use std::time::Duration;
 use tracing::{error, info};
 
 /// Client for sending alert notifications to a Slack channel.
@@ -12,8 +13,12 @@ pub struct AlertClient {
 impl AlertClient {
     /// Create a new alert client. If `channel_id` is `None`, alerts are silently dropped.
     pub fn new(bot_token: &str, channel_id: Option<String>) -> Self {
+        let http = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .expect("failed to build HTTP client"); // infallible with default TLS
         Self {
-            http: Client::new(),
+            http,
             bot_token: bot_token.to_string(),
             channel_id,
         }
@@ -37,7 +42,18 @@ impl AlertClient {
             .await;
 
         match resp {
-            Ok(_) => info!("alert sent to {channel_id}"),
+            Ok(r) => {
+                let body: serde_json::Value = r.json().await.unwrap_or_default();
+                if body.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+                    info!("alert sent to {channel_id}");
+                } else {
+                    let err = body
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    error!(channel_id, error = err, "Slack rejected alert message");
+                }
+            }
             Err(e) => error!("failed to send alert: {e}"),
         }
 

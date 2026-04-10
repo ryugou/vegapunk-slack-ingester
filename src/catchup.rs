@@ -2,10 +2,11 @@ use anyhow::Result;
 use tracing::{info, warn};
 
 use crate::config::Config;
-use crate::converter::{slack_to_ingest, SlackMessage};
+use crate::converter::{history_to_slack_messages, ingest_batch, rfc3339_to_slack_ts};
 use crate::cursor::CursorStore;
 use crate::slack::SlackClient;
 use crate::vegapunk::VegapunkClient;
+use crate::SCHEMA_NAME;
 
 /// Catch up on messages sent while the ingester was offline.
 ///
@@ -31,12 +32,14 @@ pub async fn run_catchup(
             ts.clone()
         } else {
             match vegapunk
-                .get_latest_message_ts("slack-ingester", channel_id)
+                .get_latest_message_ts(SCHEMA_NAME, channel_id)
                 .await
             {
-                Ok(Some(ts)) => {
-                    info!(channel_id, cursor = %ts, "catching up from Vegapunk QueryNodes");
-                    ts
+                Ok(Some(rfc3339_ts)) => {
+                    // Vegapunk stores RFC3339; Slack API expects Unix epoch ts
+                    let slack_ts = rfc3339_to_slack_ts(&rfc3339_ts).unwrap_or(rfc3339_ts);
+                    info!(channel_id, cursor = %slack_ts, "catching up from Vegapunk QueryNodes");
+                    slack_ts
                 }
                 Ok(None) => {
                     info!(channel_id, "no data in Vegapunk, skipping catchup");
@@ -62,78 +65,15 @@ pub async fn run_catchup(
                 .conversations_history(channel_id, Some(&oldest), cursor_page.as_deref(), 200)
                 .await?;
 
-            let mut batch: Vec<SlackMessage> = Vec::new();
+            let mut batch =
+                history_to_slack_messages(&history.messages, channel_id, &channel_name, slack)
+                    .await?;
 
-            for msg in &history.messages {
-                if msg.bot_id.is_some() {
-                    continue;
-                }
-                let Some(ref user_id) = msg.user else {
-                    continue;
-                };
-                let Some(ref text) = msg.text else {
-                    continue;
-                };
+            ingest_batch(&mut batch, vegapunk, config.ingest_batch_size, channel_id).await?;
 
-                let user_name = slack
-                    .get_user_name(user_id)
-                    .await
-                    .unwrap_or_else(|_| user_id.clone());
-
-                batch.push(SlackMessage {
-                    text: text.clone(),
-                    user_id: user_id.clone(),
-                    user_name,
-                    channel_id: channel_id.clone(),
-                    channel_name: channel_name.clone(),
-                    ts: msg.ts.clone(),
-                    thread_ts: msg.thread_ts.clone(),
-                });
-
-                if msg.reply_count.unwrap_or(0) > 0 && msg.thread_ts.is_none() {
-                    let replies = slack.conversations_replies(channel_id, &msg.ts).await?;
-                    for reply in &replies.messages {
-                        if reply.ts == msg.ts {
-                            continue;
-                        }
-                        if reply.bot_id.is_some() {
-                            continue;
-                        }
-                        let Some(ref reply_user) = reply.user else {
-                            continue;
-                        };
-                        let Some(ref reply_text) = reply.text else {
-                            continue;
-                        };
-                        let reply_user_name = slack
-                            .get_user_name(reply_user)
-                            .await
-                            .unwrap_or_else(|_| reply_user.clone());
-
-                        batch.push(SlackMessage {
-                            text: reply_text.clone(),
-                            user_id: reply_user.clone(),
-                            user_name: reply_user_name,
-                            channel_id: channel_id.clone(),
-                            channel_name: channel_name.clone(),
-                            ts: reply.ts.clone(),
-                            thread_ts: reply.thread_ts.clone(),
-                        });
-                    }
-                }
-
-                last_ts = Some(msg.ts.clone());
-            }
-
-            batch.sort_by(|a, b| a.ts.cmp(&b.ts));
-
-            for chunk in batch.chunks(config.ingest_batch_size) {
-                let ingest_msgs: Vec<_> = chunk
-                    .iter()
-                    .map(|m| slack_to_ingest(m, "slack-ingester"))
-                    .collect();
-                let count = vegapunk.ingest(ingest_msgs, "slack-ingester").await?;
-                info!(channel_id, ingested = count, "batch ingested");
+            // Save the maximum ts after sorting (ingest_batch sorts the batch)
+            if let Some(max_ts) = batch.iter().map(|m| &m.ts).max() {
+                last_ts = Some(max_ts.clone());
             }
 
             if let Some(ref ts) = last_ts {

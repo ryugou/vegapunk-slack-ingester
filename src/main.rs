@@ -53,12 +53,15 @@ async fn main() -> anyhow::Result<()> {
             tracing::info!("connected to Vegapunk");
 
             if !vegapunk_client
-                .check_schema_exists("slack-ingester")
+                .check_schema_exists(vegapunk_slack_ingester::SCHEMA_NAME)
                 .await?
             {
-                anyhow::bail!("schema 'slack-ingester' does not exist. Create it via admin UI before starting the ingester.");
+                anyhow::bail!("schema '{}' does not exist. Create it via admin UI before starting the ingester.", vegapunk_slack_ingester::SCHEMA_NAME);
             }
-            tracing::info!("schema 'slack-ingester' confirmed");
+            tracing::info!(
+                schema = vegapunk_slack_ingester::SCHEMA_NAME,
+                "schema confirmed"
+            );
 
             let mut slack_client = slack::SlackClient::new(&config.slack_bot_token, 3600);
 
@@ -93,10 +96,13 @@ async fn main() -> anyhow::Result<()> {
             .await?;
 
             if !vegapunk_client
-                .check_schema_exists("slack-ingester")
+                .check_schema_exists(vegapunk_slack_ingester::SCHEMA_NAME)
                 .await?
             {
-                anyhow::bail!("schema 'slack-ingester' does not exist.");
+                anyhow::bail!(
+                    "schema '{}' does not exist.",
+                    vegapunk_slack_ingester::SCHEMA_NAME
+                );
             }
 
             let mut slack_client = slack::SlackClient::new(&config.slack_bot_token, 3600);
