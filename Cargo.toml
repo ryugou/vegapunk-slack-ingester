@@ -26,6 +26,11 @@ anyhow = "1"
 thiserror = "1"
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 futures-util = "0.3"
+calamine = "0.26"
+zip = "2"
+pdf-extract = "0.7"
+scraper = "0.22"
+regex = "1"
 
 [dev-dependencies]
 tempfile = "3"

@@ -50,6 +50,18 @@ pub struct HistoryData {
     pub response_metadata: Option<ResponseMetadata>,
 }
 
+/// A file attachment included in a Slack message.
+#[derive(Debug, Deserialize, Clone)]
+pub struct SlackFile {
+    pub id: String,
+    pub name: Option<String>,
+    pub mimetype: Option<String>,
+    pub url_private: Option<String>,
+    pub filetype: Option<String>,
+    pub size: Option<u64>,
+    pub external_type: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct HistoryMessage {
     pub r#type: Option<String>,
@@ -59,6 +71,7 @@ pub struct HistoryMessage {
     pub thread_ts: Option<String>,
     pub bot_id: Option<String>,
     pub reply_count: Option<u32>,
+    pub files: Option<Vec<SlackFile>>,
 }
 
 #[derive(Debug, Deserialize)]
