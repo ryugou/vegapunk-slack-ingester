@@ -39,6 +39,7 @@ struct SocketEvent {
     ts: String,
     thread_ts: Option<String>,
     bot_id: Option<String>,
+    files: Option<Vec<crate::slack::types::SlackFile>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +128,14 @@ async fn build_message_from_event(
         .get_channel_name(&channel_id)
         .await
         .unwrap_or_else(|_| channel_id.clone());
+
+    let file_text = if let Some(ref files) = event.files {
+        crate::extractor::extract_files(files, &config.slack_user_token).await
+    } else {
+        String::new()
+    };
+    let link_text = crate::extractor::link_titles(&text).await;
+    let text = format!("{text}{file_text}{link_text}");
 
     Ok(Some(SlackMessage {
         text,

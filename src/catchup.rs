@@ -65,9 +65,14 @@ pub async fn run_catchup(
                 .conversations_history(channel_id, Some(&oldest), cursor_page.as_deref(), 200)
                 .await?;
 
-            let mut batch =
-                history_to_slack_messages(&history.messages, channel_id, &channel_name, slack)
-                    .await?;
+            let mut batch = history_to_slack_messages(
+                &history.messages,
+                channel_id,
+                &channel_name,
+                slack,
+                &config.slack_user_token,
+            )
+            .await?;
 
             ingest_batch(&mut batch, vegapunk, config.ingest_batch_size, channel_id).await?;
 

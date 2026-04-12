@@ -62,11 +62,14 @@ pub fn slack_to_ingest(msg: &SlackMessage) -> IngestMessage {
 /// Convert a batch of Slack API history messages into `SlackMessage` structs,
 /// resolving user names via the Slack client cache. Thread replies are fetched
 /// and appended after their parent message.
+///
+/// `user_token` is used to authenticate file downloads for attachment extraction.
 pub async fn history_to_slack_messages(
     msgs: &[HistoryMessage],
     channel_id: &str,
     channel_name: &str,
     slack: &mut SlackClient,
+    user_token: &str,
 ) -> Result<Vec<SlackMessage>> {
     let mut batch: Vec<SlackMessage> = Vec::new();
 
@@ -89,8 +92,16 @@ pub async fn history_to_slack_messages(
             .await
             .unwrap_or_else(|_| user_id.clone());
 
+        let file_text = if let Some(ref files) = msg.files {
+            crate::extractor::extract_files(files, user_token).await
+        } else {
+            String::new()
+        };
+        let link_text = crate::extractor::link_titles(text).await;
+        let enriched = format!("{text}{file_text}{link_text}");
+
         batch.push(SlackMessage {
-            text: text.clone(),
+            text: enriched,
             user_id: user_id.clone(),
             user_name,
             channel_id: channel_id.to_string(),
@@ -122,8 +133,16 @@ pub async fn history_to_slack_messages(
                     .await
                     .unwrap_or_else(|_| reply_user.clone());
 
+                let reply_file_text = if let Some(ref files) = reply.files {
+                    crate::extractor::extract_files(files, user_token).await
+                } else {
+                    String::new()
+                };
+                let reply_link_text = crate::extractor::link_titles(reply_text).await;
+                let enriched_reply = format!("{reply_text}{reply_file_text}{reply_link_text}");
+
                 batch.push(SlackMessage {
-                    text: reply_text.clone(),
+                    text: enriched_reply,
                     user_id: reply_user.clone(),
                     user_name: reply_user_name,
                     channel_id: channel_id.to_string(),
