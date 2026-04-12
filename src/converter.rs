@@ -80,6 +80,9 @@ pub async fn history_to_slack_messages(
         let Some(ref text) = msg.text else {
             continue;
         };
+        if text.is_empty() {
+            continue;
+        }
 
         let user_name = slack
             .get_user_name(user_id)
@@ -111,6 +114,9 @@ pub async fn history_to_slack_messages(
                 let Some(ref reply_text) = reply.text else {
                     continue;
                 };
+                if reply_text.is_empty() {
+                    continue;
+                }
                 let reply_user_name = slack
                     .get_user_name(reply_user)
                     .await
