@@ -8,23 +8,29 @@ use super::types::*;
 use crate::cache::TtlCache;
 
 /// HTTP client for the Slack Web API with built-in rate limiting and caching.
+///
+/// Used for read-only operations (conversations.history/replies/info, users.info).
+/// Authenticated with a User Token (xoxp-) so it can read any channel/DM the
+/// authenticating user has access to, including self-DMs.
 pub struct SlackClient {
     http: Client,
-    bot_token: String,
+    token: String,
     user_cache: TtlCache,
     channel_cache: TtlCache,
 }
 
 impl SlackClient {
-    /// Create a new client. `cache_ttl_secs` controls how long user/channel names are cached.
-    pub fn new(bot_token: &str, cache_ttl_secs: u64) -> Self {
+    /// Create a new client. The token should be a User Token (xoxp-) with
+    /// read scopes. `cache_ttl_secs` controls how long user/channel names
+    /// are cached.
+    pub fn new(token: &str, cache_ttl_secs: u64) -> Self {
         let http = Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
             .expect("failed to build HTTP client"); // infallible with default TLS
         Self {
             http,
-            bot_token: bot_token.to_string(),
+            token: token.to_string(),
             user_cache: TtlCache::new(cache_ttl_secs),
             channel_cache: TtlCache::new(cache_ttl_secs),
         }
@@ -148,7 +154,7 @@ impl SlackClient {
             let resp = self
                 .http
                 .get(&url)
-                .header("Authorization", format!("Bearer {}", self.bot_token))
+                .header("Authorization", format!("Bearer {}", self.token))
                 .query(params)
                 .send()
                 .await

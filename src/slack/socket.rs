@@ -102,8 +102,8 @@ async fn build_message_from_event(
     }
 
     let text = match event.text {
-        Some(t) => t,
-        None => return Ok(None),
+        Some(t) if !t.is_empty() => t,
+        _ => return Ok(None),
     };
     let user_id = match event.user {
         Some(u) => u,

@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
                 "schema confirmed"
             );
 
-            let mut slack_client = slack::SlackClient::new(&config.slack_bot_token, 3600);
+            let mut slack_client = slack::SlackClient::new(&config.slack_user_token, 3600);
 
             let cursor_store = cursor::CursorStore::new(&config.cursor_file_path);
 
@@ -116,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
 
-            let mut slack_client = slack::SlackClient::new(&config.slack_bot_token, 3600);
+            let mut slack_client = slack::SlackClient::new(&config.slack_user_token, 3600);
 
             import::run_import(
                 &config,

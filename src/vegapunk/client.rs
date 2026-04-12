@@ -5,6 +5,7 @@ use tracing::info;
 
 use crate::converter::IngestMessage;
 
+#[allow(clippy::doc_overindented_list_items)]
 pub mod proto {
     tonic::include_proto!("graphrag");
 }
@@ -94,14 +95,9 @@ impl VegapunkClient {
             .await
             .context("failed to query nodes for cursor recovery")?;
         let nodes = response.into_inner().nodes;
-        // The proto defines `repeated Attribute attributes` (key/value pairs),
-        // so we iterate to find the "timestamp" attribute.
-        let ts = nodes.first().and_then(|n| {
-            n.attributes
-                .iter()
-                .find(|a| a.key == "timestamp")
-                .map(|a| a.value.clone())
-        });
+        let ts = nodes
+            .first()
+            .and_then(|n| n.attributes.get("timestamp").cloned());
         Ok(ts)
     }
 

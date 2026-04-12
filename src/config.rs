@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 pub struct Config {
     // Required
     pub slack_bot_token: String,
+    pub slack_user_token: String,
     pub slack_app_token: String,
     pub vegapunk_auth_token: String,
     // Optional with defaults
@@ -20,6 +21,7 @@ impl Config {
     /// Load and validate config from environment variables.
     pub fn from_env() -> Result<Self> {
         let slack_bot_token = required_env("SLACK_BOT_TOKEN")?;
+        let slack_user_token = required_env("SLACK_USER_TOKEN")?;
         let slack_app_token = required_env("SLACK_APP_TOKEN")?;
         let vegapunk_auth_token = required_env("VEGAPUNK_AUTH_TOKEN")?;
 
@@ -52,6 +54,7 @@ impl Config {
 
         Ok(Config {
             slack_bot_token,
+            slack_user_token,
             slack_app_token,
             vegapunk_auth_token,
             vegapunk_grpc_endpoint,
