@@ -39,6 +39,7 @@ struct SocketEvent {
     ts: String,
     thread_ts: Option<String>,
     bot_id: Option<String>,
+    files: Option<Vec<crate::slack::types::SlackFile>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +128,10 @@ async fn build_message_from_event(
         .get_channel_name(&channel_id)
         .await
         .unwrap_or_else(|_| channel_id.clone());
+
+    let text =
+        crate::extractor::enrich_text(&text, event.files.as_deref(), &config.slack_user_token)
+            .await;
 
     Ok(Some(SlackMessage {
         text,
