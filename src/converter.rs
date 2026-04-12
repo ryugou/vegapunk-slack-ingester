@@ -40,9 +40,23 @@ pub struct IngestMetadata {
 }
 
 /// Convert a Slack message to the Vegapunk ingest format.
+///
+/// `thread_id` mapping: Slack replies have `thread_ts` set to the parent's
+/// `ts`. Parent messages (thread starters) have `thread_ts = None`, but
+/// they implicitly belong to a thread identified by their own `ts`. We
+/// normalize this by falling back to `msg.ts` when `thread_ts` is absent,
+/// ensuring parent and replies share the same Thread node in vegapunk.
 pub fn slack_to_ingest(msg: &SlackMessage) -> IngestMessage {
     let id = format!("{}-{}", msg.channel_id, msg.ts);
     let timestamp = slack_ts_to_rfc3339(&msg.ts);
+
+    // Parent messages: thread_ts is None → use own ts as thread_id
+    // Reply messages: thread_ts is Some(parent_ts) → use as-is
+    let thread_id = Some(
+        msg.thread_ts
+            .clone()
+            .unwrap_or_else(|| msg.ts.clone()),
+    );
 
     IngestMessage {
         id,
@@ -53,7 +67,7 @@ pub fn slack_to_ingest(msg: &SlackMessage) -> IngestMessage {
             author_id: msg.user_id.clone(),
             channel: msg.channel_name.clone(),
             channel_id: msg.channel_id.clone(),
-            thread_id: msg.thread_ts.clone(),
+            thread_id,
             timestamp,
         },
     }
