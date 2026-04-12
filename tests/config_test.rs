@@ -7,6 +7,7 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn clear_all_config_vars() {
     std::env::remove_var("SLACK_BOT_TOKEN");
+    std::env::remove_var("SLACK_USER_TOKEN");
     std::env::remove_var("SLACK_APP_TOKEN");
     std::env::remove_var("VEGAPUNK_AUTH_TOKEN");
     std::env::remove_var("VEGAPUNK_GRPC_ENDPOINT");
@@ -23,12 +24,14 @@ fn test_config_from_env_all_required() {
     clear_all_config_vars();
 
     std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test");
+    std::env::set_var("SLACK_USER_TOKEN", "xoxp-test");
     std::env::set_var("SLACK_APP_TOKEN", "xapp-test");
     std::env::set_var("VEGAPUNK_AUTH_TOKEN", "test-token");
 
     let config = Config::from_env().unwrap();
 
     assert_eq!(config.slack_bot_token, "xoxb-test");
+    assert_eq!(config.slack_user_token, "xoxp-test");
     assert_eq!(config.slack_app_token, "xapp-test");
     assert_eq!(config.vegapunk_auth_token, "test-token");
     assert_eq!(config.vegapunk_grpc_endpoint, "host.docker.internal:6840");
@@ -53,6 +56,7 @@ fn test_config_custom_values() {
     clear_all_config_vars();
 
     std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test");
+    std::env::set_var("SLACK_USER_TOKEN", "xoxp-test");
     std::env::set_var("SLACK_APP_TOKEN", "xapp-test");
     std::env::set_var("VEGAPUNK_AUTH_TOKEN", "test-token");
     std::env::set_var("VEGAPUNK_GRPC_ENDPOINT", "localhost:6840");
