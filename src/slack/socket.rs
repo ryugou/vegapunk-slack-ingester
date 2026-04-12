@@ -129,13 +129,9 @@ async fn build_message_from_event(
         .await
         .unwrap_or_else(|_| channel_id.clone());
 
-    let file_text = if let Some(ref files) = event.files {
-        crate::extractor::extract_files(files, &config.slack_user_token).await
-    } else {
-        String::new()
-    };
-    let link_text = crate::extractor::link_titles(&text).await;
-    let text = format!("{text}{file_text}{link_text}");
+    let text =
+        crate::extractor::enrich_text(&text, event.files.as_deref(), &config.slack_user_token)
+            .await;
 
     Ok(Some(SlackMessage {
         text,

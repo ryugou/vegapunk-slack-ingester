@@ -80,10 +80,11 @@ pub async fn history_to_slack_messages(
         let Some(ref user_id) = msg.user else {
             continue;
         };
-        let Some(ref text) = msg.text else {
-            continue;
-        };
-        if text.is_empty() {
+        let text = msg.text.as_deref().unwrap_or("");
+        let has_files = msg.files.as_ref().is_some_and(|f| !f.is_empty());
+
+        // Skip messages with no text AND no files
+        if text.is_empty() && !has_files {
             continue;
         }
 
@@ -92,13 +93,12 @@ pub async fn history_to_slack_messages(
             .await
             .unwrap_or_else(|_| user_id.clone());
 
-        let file_text = if let Some(ref files) = msg.files {
-            crate::extractor::extract_files(files, user_token).await
-        } else {
-            String::new()
-        };
-        let link_text = crate::extractor::link_titles(text).await;
-        let enriched = format!("{text}{file_text}{link_text}");
+        let enriched = crate::extractor::enrich_text(text, msg.files.as_deref(), user_token).await;
+
+        // After enrichment, skip if still empty
+        if enriched.trim().is_empty() {
+            continue;
+        }
 
         batch.push(SlackMessage {
             text: enriched,
@@ -122,24 +122,25 @@ pub async fn history_to_slack_messages(
                 let Some(ref reply_user) = reply.user else {
                     continue;
                 };
-                let Some(ref reply_text) = reply.text else {
-                    continue;
-                };
-                if reply_text.is_empty() {
+                let reply_text = reply.text.as_deref().unwrap_or("");
+                let reply_has_files = reply.files.as_ref().is_some_and(|f| !f.is_empty());
+
+                if reply_text.is_empty() && !reply_has_files {
                     continue;
                 }
+
                 let reply_user_name = slack
                     .get_user_name(reply_user)
                     .await
                     .unwrap_or_else(|_| reply_user.clone());
 
-                let reply_file_text = if let Some(ref files) = reply.files {
-                    crate::extractor::extract_files(files, user_token).await
-                } else {
-                    String::new()
-                };
-                let reply_link_text = crate::extractor::link_titles(reply_text).await;
-                let enriched_reply = format!("{reply_text}{reply_file_text}{reply_link_text}");
+                let enriched_reply =
+                    crate::extractor::enrich_text(reply_text, reply.files.as_deref(), user_token)
+                        .await;
+
+                if enriched_reply.trim().is_empty() {
+                    continue;
+                }
 
                 batch.push(SlackMessage {
                     text: enriched_reply,

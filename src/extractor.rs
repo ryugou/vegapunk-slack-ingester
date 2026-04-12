@@ -29,16 +29,33 @@ static SLACK_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Download and extract text from every file in `files`.
+/// Enrich a message's text with file attachment content and link titles.
 ///
-/// Returns a newline-prefixed string of all extracted pieces joined with
-/// newlines, or an empty string when `files` is empty or all files are skipped.
-pub async fn extract_files(files: &[SlackFile], user_token: &str) -> String {
+/// This is the single entry point used by both converter (batch import) and
+/// socket (realtime). Files are downloaded using `user_token`.
+pub async fn enrich_text(text: &str, files: Option<&[SlackFile]>, user_token: &str) -> String {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .unwrap_or_default();
 
+    let file_text = match files {
+        Some(f) if !f.is_empty() => extract_files_with_client(&client, f, user_token).await,
+        _ => String::new(),
+    };
+    let link_text = link_titles_with_client(&client, text).await;
+    format!("{text}{file_text}{link_text}")
+}
+
+/// Download and extract text from every file in `files`.
+///
+/// Returns a newline-prefixed string of all extracted pieces joined with
+/// newlines, or an empty string when `files` is empty or all files are skipped.
+async fn extract_files_with_client(
+    client: &reqwest::Client,
+    files: &[SlackFile],
+    user_token: &str,
+) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     for file in files {
@@ -63,7 +80,7 @@ pub async fn extract_files(files: &[SlackFile], user_token: &str) -> String {
 
         let filetype = file.filetype.as_deref().unwrap_or("");
 
-        match extract_file_content(&client, url, user_token, filetype, name).await {
+        match extract_file_content(client, url, user_token, filetype, name).await {
             Ok(text) => parts.push(format!("--- Attachment: {name} ---\n{text}")),
             Err(e) => {
                 warn!(name, error = %e, "failed to extract file, falling back to URL");
@@ -80,24 +97,16 @@ pub async fn extract_files(files: &[SlackFile], user_token: &str) -> String {
 }
 
 /// Fetch `<title>` tags from all non-Slack URLs found in `text`.
-///
-/// Returns a formatted `"\n--- Links ---\n..."` block, or an empty string
-/// when no URLs are found or no titles are retrievable.
-pub async fn link_titles(text: &str) -> String {
+async fn link_titles_with_client(client: &reqwest::Client, text: &str) -> String {
     let urls = extract_urls(text);
     if urls.is_empty() {
         return String::new();
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .unwrap_or_default();
-
     let mut lines: Vec<String> = Vec::new();
 
     for url in &urls {
-        if let Some(title) = fetch_title(&client, url).await {
+        if let Some(title) = fetch_title(client, url).await {
             lines.push(format!("{url}: {title}"));
         }
     }
@@ -116,13 +125,13 @@ pub async fn link_titles(text: &str) -> String {
 /// Extract unique, non-Slack HTTPS URLs from Slack-formatted message text.
 ///
 /// Slack encodes links as `<https://example.com>` or `<https://example.com|label>`.
-/// URLs containing `.slack.com/` are excluded.
+/// URLs containing `.slack.com/` or pointing to private/internal networks are excluded.
 pub(crate) fn extract_urls(text: &str) -> Vec<String> {
     let mut seen: Vec<String> = Vec::new();
 
     for capture in SLACK_URL_RE.captures_iter(text) {
         let url = capture[1].to_string();
-        if url.contains(".slack.com/") {
+        if url.contains(".slack.com/") || is_internal_url(&url) {
             continue;
         }
         if !seen.contains(&url) {
@@ -131,6 +140,53 @@ pub(crate) fn extract_urls(text: &str) -> Vec<String> {
     }
 
     seen
+}
+
+/// Reject URLs pointing at localhost, private RFC1918 ranges, link-local, or
+/// cloud metadata endpoints to prevent SSRF.
+fn is_internal_url(url: &str) -> bool {
+    // Extract host from URL (between :// and next / or end)
+    let host = url
+        .split("://")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .and_then(|host_port| host_port.split(':').next())
+        .unwrap_or("");
+
+    let blocked = [
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "[::1]",
+        "169.254.169.254", // AWS/GCP metadata
+        "metadata.google.internal",
+    ];
+    if blocked.iter().any(|b| host.eq_ignore_ascii_case(b)) {
+        return true;
+    }
+
+    // RFC1918 ranges: 10.x.x.x, 172.16-31.x.x, 192.168.x.x
+    if let Some(first_octet) = host.split('.').next().and_then(|s| s.parse::<u8>().ok()) {
+        if first_octet == 10 {
+            return true;
+        }
+        if first_octet == 192 {
+            if let Some(second) = host.split('.').nth(1).and_then(|s| s.parse::<u8>().ok()) {
+                if second == 168 {
+                    return true;
+                }
+            }
+        }
+        if first_octet == 172 {
+            if let Some(second) = host.split('.').nth(1).and_then(|s| s.parse::<u8>().ok()) {
+                if (16..=31).contains(&second) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +346,7 @@ fn extract_pdf(data: &[u8]) -> Result<String> {
 }
 
 /// Download bytes from `url` using a Bearer token, with a 30-second timeout.
+/// Rejects responses larger than [`MAX_FILE_BYTES`].
 async fn download(client: &reqwest::Client, url: &str, token: &str) -> Result<Vec<u8>> {
     let response = client
         .get(url)
@@ -298,13 +355,31 @@ async fn download(client: &reqwest::Client, url: &str, token: &str) -> Result<Ve
         .await
         .with_context(|| format!("GET {url}"))?;
 
+    let status = response.status();
+    if !status.is_success() {
+        anyhow::bail!("HTTP {status} for {url}");
+    }
+
+    if let Some(len) = response.content_length() {
+        if len > MAX_FILE_BYTES {
+            anyhow::bail!("response too large ({len} bytes, limit {MAX_FILE_BYTES})");
+        }
+    }
+
     let bytes = response
         .bytes()
         .await
         .with_context(|| format!("reading response body from {url}"))?;
 
+    if bytes.len() as u64 > MAX_FILE_BYTES {
+        anyhow::bail!("downloaded body too large ({} bytes)", bytes.len());
+    }
+
     Ok(bytes.to_vec())
 }
+
+/// Maximum HTML body to read for title extraction (1 MB).
+const MAX_TITLE_BODY_BYTES: usize = 1024 * 1024;
 
 /// Fetch the `<title>` of a web page, returning `None` on any error or missing title.
 async fn fetch_title(client: &reqwest::Client, url: &str) -> Option<String> {
@@ -314,7 +389,11 @@ async fn fetch_title(client: &reqwest::Client, url: &str) -> Option<String> {
         return None;
     }
 
-    let body = response.text().await.ok()?;
+    let bytes = response.bytes().await.ok()?;
+    if bytes.len() > MAX_TITLE_BODY_BYTES {
+        return None;
+    }
+    let body = String::from_utf8_lossy(&bytes).into_owned();
     let document = scraper::Html::parse_document(&body);
 
     // SAFETY: "title" is a valid CSS selector literal; Selector::parse cannot
