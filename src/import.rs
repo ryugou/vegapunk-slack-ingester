@@ -63,7 +63,7 @@ pub async fn run_import(
             break;
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     }
 
     info!(channel_id, total_count, "import complete");

@@ -40,9 +40,23 @@ pub struct IngestMetadata {
 }
 
 /// Convert a Slack message to the Vegapunk ingest format.
+///
+/// `thread_id` mapping: Slack replies have `thread_ts` set to the parent's
+/// `ts`. Parent messages (thread starters) have `thread_ts = None`, but
+/// they implicitly belong to a thread identified by their own `ts`. We
+/// normalize this by falling back to `msg.ts` when `thread_ts` is absent,
+/// ensuring parent and replies share the same Thread node in vegapunk.
 pub fn slack_to_ingest(msg: &SlackMessage) -> IngestMessage {
     let id = format!("{}-{}", msg.channel_id, msg.ts);
     let timestamp = slack_ts_to_rfc3339(&msg.ts);
+
+    // Parent messages: thread_ts is None → use own ts as thread_id
+    // Reply messages: thread_ts is Some(parent_ts) → use as-is
+    let thread_id = Some(
+        msg.thread_ts
+            .clone()
+            .unwrap_or_else(|| msg.ts.clone()),
+    );
 
     IngestMessage {
         id,
@@ -53,7 +67,7 @@ pub fn slack_to_ingest(msg: &SlackMessage) -> IngestMessage {
             author_id: msg.user_id.clone(),
             channel: msg.channel_name.clone(),
             channel_id: msg.channel_id.clone(),
-            thread_id: msg.thread_ts.clone(),
+            thread_id,
             timestamp,
         },
     }
@@ -110,7 +124,12 @@ pub async fn history_to_slack_messages(
             thread_ts: msg.thread_ts.clone(),
         });
 
-        if msg.reply_count.unwrap_or(0) > 0 && msg.thread_ts.is_none() {
+        // Fetch thread replies for parent messages. Slack sets thread_ts
+        // to the parent's own ts (not None) when the message has replies,
+        // so we check: has replies AND (thread_ts is absent OR equals own ts).
+        let is_parent = msg.thread_ts.is_none()
+            || msg.thread_ts.as_deref() == Some(msg.ts.as_str());
+        if msg.reply_count.unwrap_or(0) > 0 && is_parent {
             let replies = slack.conversations_replies(channel_id, &msg.ts).await?;
             for reply in &replies.messages {
                 if reply.ts == msg.ts {
@@ -152,7 +171,7 @@ pub async fn history_to_slack_messages(
                     thread_ts: reply.thread_ts.clone(),
                 });
             }
-            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         }
     }
 

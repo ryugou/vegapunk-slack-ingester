@@ -21,7 +21,11 @@ fn test_basic_message_conversion() {
     assert_eq!(result.metadata.author_id, "U01ABC123");
     assert_eq!(result.metadata.channel, "#engineering");
     assert_eq!(result.metadata.channel_id, "C06ABC123");
-    assert!(result.metadata.thread_id.is_none());
+    // Parent messages (thread_ts=None) use their own ts as thread_id
+    assert_eq!(
+        result.metadata.thread_id.as_deref(),
+        Some("1712345678.123456")
+    );
     assert!(result.metadata.timestamp.contains("T"));
     assert!(result.metadata.timestamp.contains("+") || result.metadata.timestamp.contains("Z"));
 }
