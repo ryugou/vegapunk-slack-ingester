@@ -124,7 +124,12 @@ pub async fn history_to_slack_messages(
             thread_ts: msg.thread_ts.clone(),
         });
 
-        if msg.reply_count.unwrap_or(0) > 0 && msg.thread_ts.is_none() {
+        // Fetch thread replies for parent messages. Slack sets thread_ts
+        // to the parent's own ts (not None) when the message has replies,
+        // so we check: has replies AND (thread_ts is absent OR equals own ts).
+        let is_parent = msg.thread_ts.is_none()
+            || msg.thread_ts.as_deref() == Some(msg.ts.as_str());
+        if msg.reply_count.unwrap_or(0) > 0 && is_parent {
             let replies = slack.conversations_replies(channel_id, &msg.ts).await?;
             for reply in &replies.messages {
                 if reply.ts == msg.ts {
