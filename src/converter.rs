@@ -178,14 +178,19 @@ pub async fn history_to_slack_messages(
     Ok(batch)
 }
 
-/// Sort messages by ts and ingest them in batches via the Vegapunk client.
+/// Sort messages by ts, deduplicate, and ingest them in batches via the Vegapunk client.
+///
+/// Deduplication is needed because Slack's "Also send to channel" (broadcast)
+/// replies appear in both `conversations.history` and `conversations.replies`,
+/// causing duplicate message IDs in the same batch.
 pub async fn ingest_batch(
-    batch: &mut [SlackMessage],
+    batch: &mut Vec<SlackMessage>,
     vegapunk: &mut VegapunkClient,
     batch_size: usize,
     channel_id: &str,
 ) -> Result<u32> {
     batch.sort_by(|a, b| a.ts.cmp(&b.ts));
+    batch.dedup_by(|a, b| a.ts == b.ts);
     let mut total: u32 = 0;
 
     for chunk in batch.chunks(batch_size) {
