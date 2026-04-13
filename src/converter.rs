@@ -166,7 +166,7 @@ pub async fn history_to_slack_messages(
                     thread_ts: reply.thread_ts.clone(),
                 });
             }
-            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         }
     }
 

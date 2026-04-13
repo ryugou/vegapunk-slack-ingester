@@ -133,7 +133,7 @@ impl SlackClient {
             if cursor.is_none() {
                 break;
             }
-            sleep(Duration::from_millis(1200)).await;
+            sleep(Duration::from_millis(1500)).await;
         }
 
         Ok(HistoryData {
